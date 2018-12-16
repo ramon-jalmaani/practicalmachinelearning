@@ -1,0 +1,169 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Ramon Jalmaani"
+date: "12/16/2018"
+output: html_document
+---
+
+<br>
+
+#### I. Executive Summary
+
+This report is submitted in partial fulfillment of the requirements in the Practical Machine Learning Course Project. This document serves as the final report of the Peer Assessment part of the Course Project. It was created in RStudio with the use of its knitr function and for publication in an html format.
+
+This document contains the data analysis that would serve both the above purpose and the course quiz. The main goal of the project is to predict how well the six (6) participants performed the exercises required of them. This is the "classe" variable in the training set of the data from http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). Special thanks goes to the authors for allowing their data to be use for this project. 
+
+In the end, we choose the Random Forest model to predict the 20 test cases from the original testing dataset because of its higher accuracy rate at 0.9973 when compared to both Decision Trees (0.7429) and the Generalized Boosted Model or GBM (0.9871).
+
+#### II. Background of the Study
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These types of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The following is a short description of the study from the website:
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)."
+
+#### III. Exploratory Data Analysis
+
+##### A. Source of Data, Preparing RStudio and Downloading the Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+We set up and clean the working directory:
+```{r code1}
+setwd("C:/Users/user/Ramon/R Work Room")
+rm(list=ls())
+```
+And then we set up RStudio by loading the R libraries needed to conduct the evaluation:
+```{r code2}
+library(caret)
+library(e1071)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+```
+We then set the seed for reproducibility purposes.
+```{r code3}
+set.seed(16661)
+```
+Finally for this part, we download the datasets to the working directory and create a partition within the original training dataset only:
+```{r code4}
+if (!file.exists("data")) {
+  dir.create("data")
+}
+trainingURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(trainingURL, destfile = "./data/pml-training.csv")
+testingURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(trainingURL, destfile = "./data/pml-testing.csv ")
+list.files("./data")
+
+training = read.csv("/Users/user/Ramon/R Work Room/data/pml-training.csv")
+testing = read.csv("/Users/user/Ramon/R Work Room/data/pml-testing.csv ")
+```
+Please note that the training dataset above is partitioned into 60% for training the predictive model and the remaining 40% for the validation:
+```{r code5}
+inTrain  <- createDataPartition(training$classe, p=0.6, list=FALSE)
+Training <- training[inTrain, ]
+Testing  <- training[-inTrain, ]
+dim(Training); dim(Testing)
+```
+Please note that the Testing dataset, which was pulled from the original training dataset, serves as the validation dataset. And so, both created datasets from the original training dataset have a combined total of 19622 observations and each has 160 variables or columns. And by running the <code>str()</code> function, we note the many variables (columns) that have mostly NAs for responses.
+```{r code6}
+str(Training)
+```
+
+```{r code7}
+str(Testing)
+```
+##### B. Cleaning the Data 
+
+To make full use of the predictive capability of our model, we now proceed to cleaning the data by removing the variables that are, for the most part, NAs. We also need to exclude both the Near Zero Variance (NZV) variables and the ID variables.
+```{r code8}
+#Removing variables that are mostly NAs
+NAvars    <- sapply(Training, function(x) mean(is.na(x))) > 0.95
+Training <- Training[, NAvars==FALSE]
+Testing <- Testing[, NAvars==FALSE]
+dim(Training); dim(Testing)
+
+#Removing variables with NZVs
+NZVvars <- nearZeroVar(Training)
+Training <- Training[, -NZVvars]
+Testing  <- Testing[, -NZVvars]
+dim(Training); dim(Testing)
+
+#Removing columns 1-5 or the ID variables
+Training <- Training[, -(1:5)]
+Testing  <- Testing[, -(1:5)]
+dim(Training); dim(Testing)
+```
+Following the cleaning of data above, we are now left with 54 variables (columns) for our analysis.
+
+#### IV. Prediction Model Building
+
+We use three (3) methods to model the predictor in the Training dataset and the method with the highest accuracy rating when applied to the Testing dataset (i.e., the validation dataset derived from the original training dataset) will be used for the quiz predictions. And to better gauge the accuracy of the models, we derive the Confusion Matrix of the Testing dataset. The methods we are using are:
+
+(1)	Decision Trees;
+(2)	Random Forests; and
+(3)	Generalized Boosted Model (GBM).
+
+##### A. Decision Trees
+```{r code9}
+#Fitting the Model
+set.seed(66611)
+modelDT <- rpart(classe ~ ., data=Training, method="class")
+fancyRpartPlot(modelDT)
+
+#Validating the Model
+predictDT <- predict(modelDT, newdata=Testing, type="class")
+CfmatrixDT <- confusionMatrix(predictDT, Testing$classe)
+CfmatrixDT
+```
+We found that the accuracy of the Decision Trees model is at 0.7429.
+
+##### B. Generalized Boosted Model (GBM)
+```{r code10}
+#Fitting the Model
+set.seed(66611)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modelGBM  <- train(classe ~ ., data=Training, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modelGBM$finalModel
+
+#Validating the Model
+predictGBM <- predict(modelGBM, newdata=Testing)
+CfmatrixGBM <- confusionMatrix(predictGBM, Testing$classe)
+CfmatrixGBM
+```
+We computed the accuracy of the GBM to be 0.9871.
+
+##### C. Random Forests
+```{r code11}
+#Fitting the Model
+set.seed(66611)
+controlRF <- trainControl(method = "cv", number = 3, verboseIter=FALSE)
+modelRF  <- train(classe ~ ., data=Training, method = "rf",
+                    trControl = controlRF)
+modelRF$finalModel
+
+#Validating the Model
+predictRF <- predict(modelRF, newdata=Testing)
+CfmatrixRF <- confusionMatrix(predictRF, Testing$classe)
+CfmatrixRF
+```
+Our computation shows that the Random Forests model has the highest accuracy rate at 0.9973.
+
+#### V. Conclusion
+
+Because it has the highest accuracy rate, we will be using the Random Forests model to predict the 20 quiz results in the original testing dataset. And we are using the following code:
+
+```{r code12}
+predict20 <- predict(modelRF, newdata=testing)
+predict20
+```
